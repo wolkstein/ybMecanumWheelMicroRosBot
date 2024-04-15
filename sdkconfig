@@ -1,6 +1,6 @@
 #
 # Automatically generated file. DO NOT EDIT.
-# Espressif IoT Development Framework (ESP-IDF) 5.1.2 Project Configuration
+# Espressif IoT Development Framework (ESP-IDF)  Project Configuration
 #
 CONFIG_SOC_MPU_MIN_REGION_SIZE=0x20000000
 CONFIG_SOC_MPU_REGIONS_MAX_NUM=8
@@ -488,7 +488,7 @@ CONFIG_MICRO_ROS_ESP_NETIF_WLAN=y
 #
 # WiFi Configuration
 #
-CONFIG_ESP_WIFI_SSID="my_ssid"
+CONFIG_ESP_WIFI_SSID="my_ssidsdfsdf"
 CONFIG_ESP_WIFI_PASSWORD="12345678"
 CONFIG_ESP_MAXIMUM_RETRY=5
 # end of WiFi Configuration
