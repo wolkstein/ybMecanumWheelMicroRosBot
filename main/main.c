@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "driver/uart.h"
 
 #if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET
 #include <uros_network_interfaces.h>
@@ -17,6 +18,7 @@
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 #include <rmw_microros/rmw_microros.h>
+#include <uxr/client/transport.h>
 #include <micro_ros_utilities/string_utilities.h>
 #include <geometry_msgs/msg/twist.h>
 #include <nav_msgs/msg/odometry.h>
@@ -26,6 +28,46 @@
 #include "icm42670p.h"
 #include "car_motion.h"
 #include "beep.h"
+
+// Custom UART transport for micro-ROS
+#define UART_BUFFER_SIZE 512
+
+static bool transport_serial_open(struct uxrCustomTransport *transport)
+{
+    size_t *uart_port = (size_t *)transport->args;
+    uart_config_t uart_config = {
+        .baud_rate  = CONFIG_MICRO_ROS_UART_BAUD,
+        .data_bits  = UART_DATA_8_BITS,
+        .parity     = UART_PARITY_DISABLE,
+        .stop_bits  = UART_STOP_BITS_1,
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+    };
+    if (uart_param_config(*uart_port, &uart_config) != ESP_OK) return false;
+    if (uart_set_pin(*uart_port, CONFIG_MICRO_ROS_UART_TXD, CONFIG_MICRO_ROS_UART_RXD,
+                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK) return false;
+    if (uart_driver_install(*uart_port, UART_BUFFER_SIZE * 2, 0, 0, NULL, 0) != ESP_OK) return false;
+    return true;
+}
+
+static bool transport_serial_close(struct uxrCustomTransport *transport)
+{
+    size_t *uart_port = (size_t *)transport->args;
+    return uart_driver_delete(*uart_port) == ESP_OK;
+}
+
+static size_t transport_serial_write(struct uxrCustomTransport *transport,
+                                     const uint8_t *buf, size_t len, uint8_t *err)
+{
+    size_t *uart_port = (size_t *)transport->args;
+    return uart_write_bytes(*uart_port, (const char *)buf, len);
+}
+
+static size_t transport_serial_read(struct uxrCustomTransport *transport,
+                                    uint8_t *buf, size_t len, int timeout, uint8_t *err)
+{
+    size_t *uart_port = (size_t *)transport->args;
+    return uart_read_bytes(*uart_port, buf, len, timeout / portTICK_PERIOD_MS);
+}
 
 
 #define RCCHECK(fn)                                                                      \
@@ -273,9 +315,10 @@ struct timespec get_timespec(void)
 
 
 // Timer callback function
-void timer_odom_callback(rcl_timer_t *timer, int64_t last_call_time)
+void timer_odom_callback(rcl_timer_t *timer, int64_t last_call_time, unsigned int calls)
 {
     RCLC_UNUSED(last_call_time);
+    RCLC_UNUSED(calls);
     if (timer != NULL)
     {
         struct timespec time_stamp = get_timespec();
@@ -295,9 +338,10 @@ void timer_odom_callback(rcl_timer_t *timer, int64_t last_call_time)
 }
 
 // Timer callback function
-void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time)
+void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time, unsigned int calls)
 {
     RCLC_UNUSED(last_call_time);
+    RCLC_UNUSED(calls);
     if (timer != NULL)
     {
         struct timespec time_stamp = get_timespec();
@@ -325,6 +369,9 @@ void beep_callback(const void * msgin)
 // micro ros processes tasks
 void micro_ros_task(void *arg)
 {
+    // Release UART0 from console driver before micro-ROS takes it
+    uart_driver_delete(UART_NUM_0);
+
     rcl_allocator_t allocator = rcl_get_default_allocator();
     rclc_support_t support;
 
@@ -336,6 +383,14 @@ void micro_ros_task(void *arg)
 
     // Initialize the rmw options
     rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
+
+    // Register custom serial transport
+    static size_t uart_port = CONFIG_MICRO_ROS_UART_NUM;
+    RCCHECK(rmw_uros_options_set_custom_transport(
+        true, (void *) &uart_port,
+        transport_serial_open, transport_serial_close,
+        transport_serial_write, transport_serial_read,
+        rmw_options));
 
     // Setup static agent IP and port for network transport.
 #if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET

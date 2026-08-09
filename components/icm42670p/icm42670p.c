@@ -12,6 +12,7 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
+#include "esp_rom_sys.h"
 
 
 #include "i2c_master.h"
@@ -40,8 +41,6 @@ struct inv_imu_serif icm_serif;
 static struct inv_imu_device icm_driver;
 
 
-extern int usleep(useconds_t us);
-
 // IMU读取数据接口
 // IMU interface for reading data
 int inv_io_hal_read_reg(struct inv_imu_serif *serif, uint8_t reg, uint8_t *rbuffer, uint32_t rlen)
@@ -55,7 +54,7 @@ int inv_io_hal_read_reg(struct inv_imu_serif *serif, uint8_t reg, uint8_t *rbuff
     while (I2C_Master_Read(ICM42670P_I2C_ADDR, reg, (uint16_t)rlen, rbuffer)) 
     {
         /* Loop in case of I2C timeout */
-        usleep(32000);
+		esp_rom_delay_us(32000);
 
         /* Timeout ~1 sec */
         retry++;
@@ -77,7 +76,7 @@ int inv_io_hal_write_reg(struct inv_imu_serif *serif, uint8_t reg, const uint8_t
     while (I2C_Master_Write(ICM42670P_I2C_ADDR, reg, (uint16_t)wlen, (uint8_t *)wbuffer)) 
     {
         /* Loop in case of I2C timeout */
-        usleep(32000);
+		esp_rom_delay_us(32000);
 
         /* Timeout ~1 sec */
         retry++;
@@ -92,7 +91,7 @@ int inv_io_hal_write_reg(struct inv_imu_serif *serif, uint8_t reg, const uint8_t
 // Microsecond delay function
 void inv_imu_sleep_us(uint32_t us)
 {
-	usleep(us);
+	esp_rom_delay_us(us);
 }
 
 // 获取时间
