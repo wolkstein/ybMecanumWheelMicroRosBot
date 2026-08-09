@@ -9,7 +9,9 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
+#if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET
 #include <uros_network_interfaces.h>
+#endif
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
@@ -19,13 +21,8 @@
 #include <geometry_msgs/msg/twist.h>
 #include <nav_msgs/msg/odometry.h>
 #include <std_msgs/msg/u_int16.h>
-#include <std_msgs/msg/int32.h>
 #include <sensor_msgs/msg/imu.h>
-#include <sensor_msgs/msg/laser_scan.h>
 
-#include "lidar_ms200.h"
-#include "ms200.h"
-#include "uart1.h"
 #include "icm42670p.h"
 #include "car_motion.h"
 #include "beep.h"
@@ -52,8 +49,10 @@
 
 #define ROS_NAMESPACE      CONFIG_MICRO_ROS_NAMESPACE
 #define ROS_DOMAIN_ID      CONFIG_MICRO_ROS_DOMAIN_ID
+#if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET
 #define ROS_AGENT_IP       CONFIG_MICRO_ROS_AGENT_IP
 #define ROS_AGENT_PORT     CONFIG_MICRO_ROS_AGENT_PORT
+#endif
 
 
 
@@ -73,10 +72,6 @@ geometry_msgs__msg__Twist twist_msg;
 rcl_subscription_t buzzer_subscriber;
 std_msgs__msg__UInt16 msg_beep;
 
-rcl_publisher_t publisher_lidar;
-sensor_msgs__msg__LaserScan msg_lidar;
-rcl_timer_t timer_lidar;
-
 
 unsigned long long time_offset = 0;
 unsigned long prev_odom_update = 0;
@@ -86,88 +81,6 @@ float y_pos_ = 0.0;
 float heading_ = 0.0;
 
 car_motion_t car_motion;
-
-// Initializes the ROS topic information for lidar
-void lidar_ros_init(void)
-{
-    int i;
-
-    msg_lidar.angle_min = -180*M_PI/180.0;
-    msg_lidar.angle_max = 180*M_PI/180.0;
-
-    msg_lidar.angle_increment = 1*M_PI/180.0;
-    msg_lidar.range_min = 0.12;
-    msg_lidar.range_max = 8.0;
-
-    msg_lidar.ranges.data = (float *)malloc(360 * sizeof(float));
-    msg_lidar.ranges.size = 360;
-    for (i = 0; i < msg_lidar.ranges.size; i++)
-    {
-        msg_lidar.ranges.data[i] = 0;
-    }
-    
-    msg_lidar.intensities.data = (float *)malloc(360 * sizeof(float));
-    msg_lidar.intensities.size = 360;
-    for (i = 0; i < msg_lidar.intensities.size; i++)
-    {
-        msg_lidar.intensities.data[i] = 10.0;
-    }
-
-    char* content_frame_id = "laser_frame";
-    int len_namespace = strlen(ROS_NAMESPACE);
-    int len_frame_id_max = len_namespace + strlen(content_frame_id) + 2;
-    // ESP_LOGI(TAG, "lidar frame len:%d", len_frame_id_max);
-    char* frame_id = malloc(len_frame_id_max);
-    if (len_namespace == 0)
-    {
-        // The ROS namespace is empty characters
-        sprintf(frame_id, "%s", content_frame_id);
-    }
-    else
-    {
-        // Concatenate the namespace and frame id
-        sprintf(frame_id, "%s/%s", ROS_NAMESPACE, content_frame_id);
-    }
-    msg_lidar.header.frame_id = micro_ros_string_utilities_set(msg_lidar.header.frame_id, frame_id);
-    free(frame_id);
-}
-
-// lidar update data task
-void lidar_update_data_task(void *arg)
-{
-    uint16_t distance_mm[MS200_POINT_MAX] = {0};
-    uint8_t intensity[MS200_POINT_MAX] = {0};
-    uint16_t index = 0;
-    int i = 0;
-
-    while (1)
-    {
-        index = 0;
-        for (i = 0; i < MS200_POINT_MAX; i++)
-        {
-            distance_mm[i] = Lidar_Ms200_Get_Distance(i);
-            intensity[i] = Lidar_Ms200_Get_Intensity(i);
-        }
-        for (i = 0; i < MS200_POINT_MAX; i++)
-        {
-            index = (MS200_POINT_MAX-i) % MS200_POINT_MAX;
-            if (index >= 180)
-            {
-                index = (index - 180) % MS200_POINT_MAX;
-            }
-            else
-            {
-                index = (index + 180) % MS200_POINT_MAX;
-            }
-            msg_lidar.ranges.data[i] = (float)(distance_mm[index] / 1000.0);
-            msg_lidar.intensities.data[i] = (float)(intensity[index]);
-        }
-        //printf("lidar distance:%.2f\n", msg_lidar.ranges.data[0]);
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-
-    vTaskDelete(NULL);
-}
 
 
 
@@ -394,19 +307,6 @@ void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time)
     }
 }
 
-// Timer callback function
-void timer_lidar_callback(rcl_timer_t *timer, int64_t last_call_time)
-{
-    RCLC_UNUSED(last_call_time);
-    if (timer != NULL)
-    {
-        struct timespec time_stamp = get_timespec();
-        msg_lidar.header.stamp.sec = time_stamp.tv_sec;
-        msg_lidar.header.stamp.nanosec = time_stamp.tv_nsec;
-        RCSOFTCHECK(rcl_publish(&publisher_lidar, &msg_lidar, NULL));
-    }
-}
-
 void twist_Callback(const void *msgin)
 {
     ESP_LOGI(TAG, "cmd_vel:%.2f, %.2f, %.2f", twist_msg.linear.x, twist_msg.linear.y, twist_msg.angular.z);
@@ -437,18 +337,28 @@ void micro_ros_task(void *arg)
     // Initialize the rmw options
     rmw_init_options_t *rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
 
-    // Setup static agent IP and port
+    // Setup static agent IP and port for network transport.
+#if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET
     RCCHECK(rmw_uros_options_set_udp_address(CONFIG_MICRO_ROS_AGENT_IP, ROS_AGENT_PORT, rmw_options));
+#endif
 
     // Try to connect to the agent. If the connection succeeds, go to the next step.
-    int state_agent = 0;
+    rcl_ret_t state_agent = RCL_RET_ERROR;
     while (1)
     {
+#if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET
         ESP_LOGI(TAG, "Connecting agent: %s:%s", CONFIG_MICRO_ROS_AGENT_IP, ROS_AGENT_PORT);
+#else
+        ESP_LOGI(TAG, "Connecting agent over UART transport");
+#endif
         state_agent = rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator);
-        if (state_agent == ESP_OK)
+        if (state_agent == RCL_RET_OK)
         {
+#if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET
             ESP_LOGI(TAG, "Connected agent: %s:%s", CONFIG_MICRO_ROS_AGENT_IP, ROS_AGENT_PORT);
+#else
+            ESP_LOGI(TAG, "Connected agent over UART transport");
+#endif
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -501,31 +411,13 @@ void micro_ros_task(void *arg)
         RCL_MS_TO_NS(imu_timer_timeout),
         timer_imu_callback));
 
-        // 创建发布者
-    // create publisher_lidar
-    RCCHECK(rclc_publisher_init_default(
-        &publisher_lidar,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
-        "scan"));
-
-    // create timer. Set the publish frequency to 11HZ
-    const unsigned int lidar_timer_timeout = 90;
-    RCCHECK(rclc_timer_init_default(
-        &timer_lidar,
-        &support,
-        RCL_MS_TO_NS(lidar_timer_timeout),
-        timer_lidar_callback));
-
     // create executor. Three of the parameters are the number of actuators controlled that is greater than or equal to the number of subscribers and publishers added to the executor.
     rclc_executor_t executor;
-    int handle_num = 6;
+    int handle_num = 4;
     RCCHECK(rclc_executor_init(&executor, &support.context, handle_num, &allocator));
     
     // Adds the publisher_odom's timer to the executor
     RCCHECK(rclc_executor_add_timer(&executor, &timer_odom));
-    // Adds the publisher_lidar's timer to the executor
-    RCCHECK(rclc_executor_add_timer(&executor, &timer_lidar));
 
     // Adds the publisher_imu's timer to the executor
     RCCHECK(rclc_executor_add_timer(&executor, &timer_imu));
@@ -561,7 +453,6 @@ void micro_ros_task(void *arg)
     RCCHECK(rcl_subscription_fini(&twist_subscriber, &node));
     RCCHECK(rcl_subscription_fini(&buzzer_subscriber,&node));
     RCCHECK(rcl_publisher_fini(&publisher_imu, &node));
-    RCCHECK(rcl_publisher_fini(&publisher_lidar, &node));
     RCCHECK(rcl_node_fini(&node));
 
     vTaskDelete(NULL);
@@ -569,22 +460,17 @@ void micro_ros_task(void *arg)
 
 void app_main(void)
 {
-
-    Uart1_Init();
-    // Initialize the Lidar
-    Lidar_Ms200_Init();
     Beep_Init();
     Motor_Init();
     Icm42670p_Init();
-    // Initialize serial port 1
-
    
     // Initialize the network and connect the WiFi signal
+#if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET
     ESP_ERROR_CHECK(uros_network_interface_initialize());
+#endif
 
     imu_ros_init();
     odom_ros_init();
-    lidar_ros_init();
 
     // Start microROS tasks
     xTaskCreate(micro_ros_task,
@@ -602,12 +488,5 @@ void app_main(void)
                 CONFIG_MICRO_ROS_APP_TASK_PRIO,
                 NULL, 1);
 
-    // Start lidar tasks
-    xTaskCreatePinnedToCore(lidar_update_data_task,
-                "lidar_update_data_task",
-                CONFIG_MICRO_ROS_APP_STACK,
-                NULL,
-                CONFIG_MICRO_ROS_APP_TASK_PRIO,
-                NULL, 1);
 }
 
