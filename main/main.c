@@ -315,10 +315,9 @@ struct timespec get_timespec(void)
 
 
 // Timer callback function
-void timer_odom_callback(rcl_timer_t *timer, int64_t last_call_time, unsigned int calls)
+void timer_odom_callback(rcl_timer_t *timer, int64_t last_call_time)
 {
     RCLC_UNUSED(last_call_time);
-    RCLC_UNUSED(calls);
     if (timer != NULL)
     {
         struct timespec time_stamp = get_timespec();
@@ -338,10 +337,9 @@ void timer_odom_callback(rcl_timer_t *timer, int64_t last_call_time, unsigned in
 }
 
 // Timer callback function
-void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time, unsigned int calls)
+void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time)
 {
     RCLC_UNUSED(last_call_time);
-    RCLC_UNUSED(calls);
     if (timer != NULL)
     {
         struct timespec time_stamp = get_timespec();
@@ -369,7 +367,8 @@ void beep_callback(const void * msgin)
 // micro ros processes tasks
 void micro_ros_task(void *arg)
 {
-    // Release UART0 from console driver before micro-ROS takes it
+    // Disable logging and release UART0 so micro-ROS can take it exclusively
+    esp_log_level_set("*", ESP_LOG_NONE);
     uart_driver_delete(UART_NUM_0);
 
     rcl_allocator_t allocator = rcl_get_default_allocator();
@@ -452,19 +451,19 @@ void micro_ros_task(void *arg)
 
     // create timer. Set the publish frequency to 11HZ
     const unsigned int odom_timer_timeout = 90;
-    RCCHECK(rclc_timer_init_default(
+    RCCHECK(rclc_timer_init_default2(
         &timer_odom,
         &support,
         RCL_MS_TO_NS(odom_timer_timeout),
-        timer_odom_callback));
+        timer_odom_callback, true));
 
     // create timer. Set the publish frequency to 25HZ
     const unsigned int imu_timer_timeout = 40;
-    RCCHECK(rclc_timer_init_default(
+    RCCHECK(rclc_timer_init_default2(
         &timer_imu,
         &support,
         RCL_MS_TO_NS(imu_timer_timeout),
-        timer_imu_callback));
+        timer_imu_callback, true));
 
     // create executor. Three of the parameters are the number of actuators controlled that is greater than or equal to the number of subscribers and publishers added to the executor.
     rclc_executor_t executor;

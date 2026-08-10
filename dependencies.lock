@@ -26,6 +26,6 @@ dependencies:
 direct_dependencies:
 - espressif/bdc_motor
 - espressif/pid_ctrl
-manifest_hash: bffc80f2420cff2e7289de85c07fce452b0b9261708aaba4fd32db47b5899f08
+manifest_hash: a3c13165156e31a892359124c0de011ca72db9e608b5802ef727e54a2ac22bdc
 target: esp32s3
 version: 2.0.0
