@@ -9,12 +9,12 @@ extern "C" {
 
 // 小车底盘轮子间距，单位:m
 // Car chassis wheel spacing, unit :m
-#define ROBOT_WIDTH                  (0.135f)
-#define ROBOT_LENGTH                 (0.095f)
+#define ROBOT_WIDTH                  (CONFIG_ROBOT_WIDTH_MM  / 1000.0f)
+#define ROBOT_LENGTH                 (CONFIG_ROBOT_LENGTH_MM / 1000.0f)
 
 // 小车上下轮子、左右轮子间距和的一半。
 // Half of the distance between the upper and lower wheels and the left and right wheels of the car.
-#define ROBOT_APB                    (0.115f)
+#define ROBOT_APB                    ((CONFIG_ROBOT_WIDTH_MM + CONFIG_ROBOT_LENGTH_MM) / 2000.0f)
 
 
 #define ROBOT_SPIN_SCALE             (5.0f)
@@ -44,6 +44,7 @@ typedef struct _car_motion
 
 
 
+void Motion_Set_Calibration(float robot_width_m, float robot_length_m);
 void Motion_Stop(uint8_t brake);
 void Motion_Ctrl(float V_x, float V_y, float V_z);
 void Motion_Ctrl_State(uint8_t state, float speed);

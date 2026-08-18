@@ -21,6 +21,7 @@
 #include <uxr/client/transport.h>
 #include <micro_ros_utilities/string_utilities.h>
 #include <geometry_msgs/msg/twist.h>
+#include <geometry_msgs/msg/vector3.h>
 #include <nav_msgs/msg/odometry.h>
 #include <std_msgs/msg/u_int16.h>
 #include <sensor_msgs/msg/imu.h>
@@ -28,6 +29,7 @@
 #include "icm42670p.h"
 #include "car_motion.h"
 #include "beep.h"
+#include "calibration.h"
 
 // Custom UART transport for micro-ROS
 #define UART_BUFFER_SIZE 512
@@ -113,6 +115,9 @@ geometry_msgs__msg__Twist twist_msg;
 
 rcl_subscription_t buzzer_subscriber;
 std_msgs__msg__UInt16 msg_beep;
+
+rcl_subscription_t calibrate_subscriber;
+geometry_msgs__msg__Vector3 msg_calibrate;
 
 
 unsigned long long time_offset = 0;
@@ -355,6 +360,16 @@ void twist_Callback(const void *msgin)
     Motion_Ctrl(twist_msg.linear.x, twist_msg.linear.y, twist_msg.angular.z);
 }
 
+// x=wheel_diameter_mm, y=robot_width_m, z=robot_length_m
+void calibrate_callback(const void *msgin)
+{
+    const geometry_msgs__msg__Vector3 *msg = (const geometry_msgs__msg__Vector3 *)msgin;
+    float circ_mm = (float)(3.14159265f * msg->x);
+    Calibration_Save((float)msg->x, (float)msg->y, (float)msg->z);
+    Motor_Set_WheelCirc(circ_mm);
+    Motion_Set_Calibration((float)msg->y, (float)msg->z);
+}
+
 // Subscriber callback function
 void beep_callback(const void * msgin)
 {
@@ -442,6 +457,13 @@ void micro_ros_task(void *arg)
 		ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt16),
 		"beep"));
 
+    // Create subscriber /calibrate  (Vector3: x=wheel_diam_mm, y=robot_width_m, z=robot_len_m)
+    RCCHECK(rclc_subscription_init_default(
+        &calibrate_subscriber,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3),
+        "calibrate"));
+
     // create publisher_imu
     RCCHECK(rclc_publisher_init_default(
         &publisher_imu,
@@ -467,7 +489,7 @@ void micro_ros_task(void *arg)
 
     // create executor. Three of the parameters are the number of actuators controlled that is greater than or equal to the number of subscribers and publishers added to the executor.
     rclc_executor_t executor;
-    int handle_num = 4;
+    int handle_num = 5;
     RCCHECK(rclc_executor_init(&executor, &support.context, handle_num, &allocator));
     
     // Adds the publisher_odom's timer to the executor
@@ -492,6 +514,13 @@ void micro_ros_task(void *arg)
         &beep_callback,
         ON_NEW_DATA));
 
+    RCCHECK(rclc_executor_add_subscription(
+        &executor,
+        &calibrate_subscriber,
+        &msg_calibrate,
+        &calibrate_callback,
+        ON_NEW_DATA));
+
 
     sync_time();
 
@@ -506,6 +535,7 @@ void micro_ros_task(void *arg)
     RCCHECK(rcl_publisher_fini(&publisher_odom, &node));
     RCCHECK(rcl_subscription_fini(&twist_subscriber, &node));
     RCCHECK(rcl_subscription_fini(&buzzer_subscriber,&node));
+    RCCHECK(rcl_subscription_fini(&calibrate_subscriber, &node));
     RCCHECK(rcl_publisher_fini(&publisher_imu, &node));
     RCCHECK(rcl_node_fini(&node));
 
@@ -514,6 +544,11 @@ void micro_ros_task(void *arg)
 
 void app_main(void)
 {
+    Calibration_Init();
+    float wheel_circ = 3.14159265f * Calib_Get_WheelDiameterMM();
+    Motor_Set_WheelCirc(wheel_circ);
+    Motion_Set_Calibration(Calib_Get_RobotWidth(), Calib_Get_RobotLength());
+
     Beep_Init();
     Motor_Init();
     Icm42670p_Init();

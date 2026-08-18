@@ -20,6 +20,9 @@
 static const char *TAG = "MOTOR";
 
 
+// mm per count per ms, recomputed when wheel circumference changes
+static float g_speed_factor = MOTOR_WHEEL_CIRCLE / MOTOR_ENCODER_CIRCLE / MOTOR_PID_PERIOD;
+
 // 10毫秒目标脉冲数
 // 10 ms target pulse number
 static float speed_count[MOTOR_MAX_NUM] = {0};
@@ -64,7 +67,7 @@ static void Motor_PID_Ctrl(void)
         cur_count[i] = Encoder_Get_Count(ENCODER_ID_M1 + i);
         real_pulse[i] = cur_count[i] - last_count[i];
         last_count[i] = cur_count[i];
-        read_speed[i] = real_pulse[i] * (MOTOR_WHEEL_CIRCLE/MOTOR_ENCODER_CIRCLE/MOTOR_PID_PERIOD);
+        read_speed[i] = real_pulse[i] * g_speed_factor;
         if (pid_enable)
         {
             pid_compute(pid_motor[i], pid_target[i] - real_pulse[i], &new_speed[i]);
@@ -121,7 +124,7 @@ void Motor_Set_Speed(float speed_m1, float speed_m2, float speed_m3, float speed
     {
         // 速度转化成10毫秒编码器目标数量
         // The speed is converted to the number of encoder targets in 10 milliseconds
-        speed_count[i] = speed_m[i] / (MOTOR_WHEEL_CIRCLE/MOTOR_ENCODER_CIRCLE/MOTOR_PID_PERIOD);
+        speed_count[i] = speed_m[i] / g_speed_factor;
         pid_target[i] = (float)speed_count[i];
     }
     pid_enable = 1;
@@ -167,6 +170,11 @@ void Motor_Read_PID_Parm(float* out_p, float* out_i, float* out_d)
     *out_p = pid_runtime_param.kp;
     *out_i = pid_runtime_param.ki;
     *out_d = pid_runtime_param.kd;
+}
+
+void Motor_Set_WheelCirc(float circ_mm)
+{
+    g_speed_factor = circ_mm / MOTOR_ENCODER_CIRCLE / MOTOR_PID_PERIOD;
 }
 
 // 初始化编码器电机

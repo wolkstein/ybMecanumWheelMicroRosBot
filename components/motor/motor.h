@@ -12,8 +12,8 @@ extern "C" {
 #define MOTOR_MAX_NUM                   (4)
 // 电机转动一圈产生的脉冲数量：13*20*4
 #define MOTOR_ENCODER_CIRCLE            (1040)
-// 轮子周长，单位：mm
-#define MOTOR_WHEEL_CIRCLE              (150.8)
+// 轮子周长，单位：mm  (π × 64mm Raddurchmesser)
+#define MOTOR_WHEEL_CIRCLE              (3.14159265f * CONFIG_ROBOT_WHEEL_DIAMETER_MM)
 // PID算法计算周期，单位：ms
 #define MOTOR_PID_PERIOD                (10)
 // 设置电机最大速度，单位：ms/s。
@@ -21,6 +21,7 @@ extern "C" {
 
 
 
+void Motor_Set_WheelCirc(float circ_mm);
 void Motor_Init(void);
 void Motor_Set_Speed(float speed_m1, float speed_m2, float speed_m3, float speed_m4);
 void Motor_Get_Speed(float* speed_m1, float* speed_m2, float* speed_m3, float* speed_m4);

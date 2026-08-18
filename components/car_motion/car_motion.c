@@ -12,6 +12,8 @@
 
 car_motion_t micro_car;
 
+static float g_robot_apb = ROBOT_APB;
+
 // 线速度和角速度
 static float line_vx = 0;
 static float line_vy = 0;
@@ -23,7 +25,11 @@ static float speed_R1_setup = 0;
 static float speed_R2_setup = 0;
 
 
-// 小车停止 Car stop
+void Motion_Set_Calibration(float robot_width_m, float robot_length_m)
+{
+    g_robot_apb = (robot_width_m + robot_length_m) / 2.0f;
+}
+
 void Motion_Stop(uint8_t brake)
 {
     Motor_Stop(brake);
@@ -36,10 +42,10 @@ void Motion_Ctrl(float V_x, float V_y, float V_z)
     line_vx = V_x;
     line_vy = V_y;
     angular_v = V_z;
-    speed_L1_setup = line_vx - line_vy - angular_v * ROBOT_APB;
-    speed_L2_setup = line_vx + line_vy - angular_v * ROBOT_APB;
-    speed_R1_setup = line_vx + line_vy + angular_v * ROBOT_APB;
-    speed_R2_setup = line_vx - line_vy + angular_v * ROBOT_APB;
+    speed_L1_setup = line_vx - line_vy - angular_v * g_robot_apb;
+    speed_L2_setup = line_vx + line_vy - angular_v * g_robot_apb;
+    speed_R1_setup = line_vx + line_vy + angular_v * g_robot_apb;
+    speed_R2_setup = line_vx - line_vy + angular_v * g_robot_apb;
     Motor_Set_Speed(speed_L1_setup, speed_L2_setup, speed_R1_setup, speed_R2_setup);
 }
 
@@ -52,7 +58,7 @@ void Motion_Get_Speed(car_motion_t* car)
 
     car->Vx = (speed_m1 + speed_m2 + speed_m3 + speed_m4) / 4;
     car->Vy = -(speed_m1 - speed_m2 - speed_m3 + speed_m4) / 4;;
-    car->Wz = -(speed_m1 + speed_m2 - speed_m3 - speed_m4) / 4.0f / ROBOT_APB;
+    car->Wz = -(speed_m1 + speed_m2 - speed_m3 - speed_m4) / 4.0f / g_robot_apb;
     if(car->Wz == 0) car->Wz = 0;
 }
 

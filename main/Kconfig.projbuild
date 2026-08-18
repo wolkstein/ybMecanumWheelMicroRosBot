@@ -50,5 +50,27 @@ menu "micro-ROS example-app settings"
         help
         RXD of the Uart connection       
 
+menu "Robot physical dimensions"
+
+    config ROBOT_WHEEL_DIAMETER_MM
+        int "Wheel diameter (mm)"
+        default 64
+        help
+        Physical wheel diameter in millimeters.
+        Used as compile-time default; can be overridden at runtime via /calibrate topic.
+
+    config ROBOT_WIDTH_MM
+        int "Track width left/right (mm)"
+        default 152
+        help
+        Distance between left and right wheel contact points in millimeters.
+
+    config ROBOT_LENGTH_MM
+        int "Wheelbase front/rear (mm)"
+        default 105
+        help
+        Distance between front and rear wheel contact points in millimeters.
+
+endmenu
         
 endmenu
