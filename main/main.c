@@ -263,34 +263,6 @@ void battery_ros_init(void)
     msg_battery.power_supply_technology = (uint8_t)Battery_Get_Technology();
 }
 
-// Timer callback function
-void timer_battery_callback(rcl_timer_t *timer, int64_t last_call_time)
-{
-    RCLC_UNUSED(last_call_time);
-    if (timer != NULL)
-    {
-        struct timespec time_stamp = get_timespec();
-        msg_battery.header.stamp.sec = time_stamp.tv_sec;
-        msg_battery.header.stamp.nanosec = time_stamp.tv_nsec;
-
-        float voltage = Battery_Get_Voltage();
-        int cells = Battery_Get_CellCount();
-        float v_max = cells * (Battery_Get_CellVoltageMaxMV() / 1000.0f);
-        float v_cutoff = cells * (Battery_Get_CellVoltageCutoffMV() / 1000.0f);
-
-        msg_battery.voltage = voltage;
-        float pct = (voltage - v_cutoff) / (v_max - v_cutoff);
-        if (pct < 0.0f) pct = 0.0f;
-        if (pct > 1.0f) pct = 1.0f;
-        msg_battery.percentage = pct;
-        msg_battery.power_supply_health = (voltage <= v_cutoff)
-            ? sensor_msgs__msg__BatteryState__POWER_SUPPLY_HEALTH_DEAD
-            : sensor_msgs__msg__BatteryState__POWER_SUPPLY_HEALTH_GOOD;
-
-        RCSOFTCHECK(rcl_publish(&publisher_battery, &msg_battery, NULL));
-    }
-}
-
 // Euler's angular revolution quaternion
 void odom_euler_to_quat(float roll, float pitch, float yaw, float *q)
 {
@@ -420,6 +392,34 @@ void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time)
         msg_imu.header.stamp.sec = time_stamp.tv_sec;
         msg_imu.header.stamp.nanosec = time_stamp.tv_nsec;
         RCSOFTCHECK(rcl_publish(&publisher_imu, &msg_imu, NULL));
+    }
+}
+
+// Timer callback function
+void timer_battery_callback(rcl_timer_t *timer, int64_t last_call_time)
+{
+    RCLC_UNUSED(last_call_time);
+    if (timer != NULL)
+    {
+        struct timespec time_stamp = get_timespec();
+        msg_battery.header.stamp.sec = time_stamp.tv_sec;
+        msg_battery.header.stamp.nanosec = time_stamp.tv_nsec;
+
+        float voltage = Battery_Get_Voltage();
+        int cells = Battery_Get_CellCount();
+        float v_max = cells * (Battery_Get_CellVoltageMaxMV() / 1000.0f);
+        float v_cutoff = cells * (Battery_Get_CellVoltageCutoffMV() / 1000.0f);
+
+        msg_battery.voltage = voltage;
+        float pct = (voltage - v_cutoff) / (v_max - v_cutoff);
+        if (pct < 0.0f) pct = 0.0f;
+        if (pct > 1.0f) pct = 1.0f;
+        msg_battery.percentage = pct;
+        msg_battery.power_supply_health = (voltage <= v_cutoff)
+            ? sensor_msgs__msg__BatteryState__POWER_SUPPLY_HEALTH_DEAD
+            : sensor_msgs__msg__BatteryState__POWER_SUPPLY_HEALTH_GOOD;
+
+        RCSOFTCHECK(rcl_publish(&publisher_battery, &msg_battery, NULL));
     }
 }
 

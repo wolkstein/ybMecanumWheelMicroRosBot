@@ -115,11 +115,14 @@ menu "Battery configuration"
 
     config BATTERY_ADC_DIVIDER_FACTOR_X1000
         int "Voltage divider factor (x1000)"
-        default 4030
+        default 4078
         help
-        Pack voltage = ADC-measured GPIO voltage * this / 1000. Default 4030
-        (factor 4.03) is Yahboom's stock onboard divider (10k/3.3k) for the
-        battery-sense circuit on GPIO3 / ADC1 channel 2.
+        Pack voltage = ADC-measured GPIO voltage * this / 1000. Yahboom's
+        nominal stock divider is 4030 (10k/3.3k, factor 4.03), but the
+        board-in-hand measured ~7.070V via ADC against 7.155V on a
+        multimeter (19.08. measurement) -- factor back-calculated as
+        7.155 / (7.070 / 4.03) = 4.078, used here instead. Re-measure and
+        adjust if this board's actual divider resistors differ.
 
 endmenu
 
