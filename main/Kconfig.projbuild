@@ -93,6 +93,15 @@ menu "Battery configuration"
         help
         Fully charged voltage per cell. 4.2V is standard for both Li-ion and LiPo.
 
+    config BATTERY_CELL_VOLTAGE_WARN_MV
+        int "Low-battery warning voltage per cell (mV)"
+        default 3450
+        help
+        Per-cell threshold below which the piezo buzzer sounds a periodic
+        low-battery warning (short beep once per second). Deliberately above
+        the cutoff threshold below, to give advance warning before the
+        conservative shutdown point is reached.
+
     config BATTERY_CELL_VOLTAGE_CUTOFF_MV
         int "Cutoff voltage per cell (mV)"
         default 3450

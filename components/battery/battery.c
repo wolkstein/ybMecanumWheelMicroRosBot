@@ -23,6 +23,7 @@ static const char *TAG = "BATTERY";
 static int32_t g_cell_count             = BATTERY_DEFAULT_CELL_COUNT;
 static int32_t g_capacity_mah           = BATTERY_DEFAULT_CAPACITY_MAH;
 static int32_t g_cell_voltage_max_mv    = BATTERY_DEFAULT_CELL_VOLTAGE_MAX_MV;
+static int32_t g_cell_voltage_warn_mv   = BATTERY_DEFAULT_CELL_VOLTAGE_WARN_MV;
 static int32_t g_cell_voltage_cutoff_mv = BATTERY_DEFAULT_CELL_VOLTAGE_CUTOFF_MV;
 static int32_t g_technology             = BATTERY_DEFAULT_TECHNOLOGY;
 static int32_t g_adc_divider_factor_x1000 = BATTERY_DEFAULT_ADC_DIVIDER_FACTOR_X1000;
@@ -49,13 +50,14 @@ static void battery_nvs_load(void)
     nvs_get_i32(handle, "cells",        &g_cell_count);
     nvs_get_i32(handle, "capacity_mah", &g_capacity_mah);
     nvs_get_i32(handle, "v_max_mv",     &g_cell_voltage_max_mv);
+    nvs_get_i32(handle, "v_warn_mv",    &g_cell_voltage_warn_mv);
     nvs_get_i32(handle, "v_cut_mv",     &g_cell_voltage_cutoff_mv);
     nvs_get_i32(handle, "tech",         &g_technology);
     nvs_get_i32(handle, "div_x1000",    &g_adc_divider_factor_x1000);
     nvs_close(handle);
 
-    ESP_LOGI(TAG, "Loaded: %" PRId32 "S %" PRId32 "mAh max=%" PRId32 "mV/cell cutoff=%" PRId32 "mV/cell tech=%" PRId32 " div=%" PRId32,
-             g_cell_count, g_capacity_mah, g_cell_voltage_max_mv,
+    ESP_LOGI(TAG, "Loaded: %" PRId32 "S %" PRId32 "mAh max=%" PRId32 "mV/cell warn=%" PRId32 "mV/cell cutoff=%" PRId32 "mV/cell tech=%" PRId32 " div=%" PRId32,
+             g_cell_count, g_capacity_mah, g_cell_voltage_max_mv, g_cell_voltage_warn_mv,
              g_cell_voltage_cutoff_mv, g_technology, g_adc_divider_factor_x1000);
 }
 
@@ -119,17 +121,19 @@ float Battery_Get_Voltage(void)             { return g_battery_voltage; }
 int   Battery_Get_CellCount(void)           { return g_cell_count; }
 int   Battery_Get_CapacityMah(void)         { return g_capacity_mah; }
 int   Battery_Get_CellVoltageMaxMV(void)    { return g_cell_voltage_max_mv; }
+int   Battery_Get_CellVoltageWarnMV(void)   { return g_cell_voltage_warn_mv; }
 int   Battery_Get_CellVoltageCutoffMV(void) { return g_cell_voltage_cutoff_mv; }
 int   Battery_Get_Technology(void)          { return g_technology; }
 int   Battery_Get_DividerFactorX1000(void)  { return g_adc_divider_factor_x1000; }
 
 void Battery_Save(int cell_count, int capacity_mah, int cell_voltage_max_mv,
-                   int cell_voltage_cutoff_mv, int technology,
-                   int adc_divider_factor_x1000)
+                   int cell_voltage_warn_mv, int cell_voltage_cutoff_mv,
+                   int technology, int adc_divider_factor_x1000)
 {
     g_cell_count               = cell_count;
     g_capacity_mah             = capacity_mah;
     g_cell_voltage_max_mv      = cell_voltage_max_mv;
+    g_cell_voltage_warn_mv     = cell_voltage_warn_mv;
     g_cell_voltage_cutoff_mv   = cell_voltage_cutoff_mv;
     g_technology               = technology;
     g_adc_divider_factor_x1000 = adc_divider_factor_x1000;
@@ -143,13 +147,14 @@ void Battery_Save(int cell_count, int capacity_mah, int cell_voltage_max_mv,
     nvs_set_i32(handle, "cells",        cell_count);
     nvs_set_i32(handle, "capacity_mah", capacity_mah);
     nvs_set_i32(handle, "v_max_mv",     cell_voltage_max_mv);
+    nvs_set_i32(handle, "v_warn_mv",    cell_voltage_warn_mv);
     nvs_set_i32(handle, "v_cut_mv",     cell_voltage_cutoff_mv);
     nvs_set_i32(handle, "tech",         technology);
     nvs_set_i32(handle, "div_x1000",    adc_divider_factor_x1000);
     nvs_commit(handle);
     nvs_close(handle);
 
-    ESP_LOGI(TAG, "Saved: %dS %dmAh max=%dmV/cell cutoff=%dmV/cell tech=%d div=%d",
-             cell_count, capacity_mah, cell_voltage_max_mv, cell_voltage_cutoff_mv,
-             technology, adc_divider_factor_x1000);
+    ESP_LOGI(TAG, "Saved: %dS %dmAh max=%dmV/cell warn=%dmV/cell cutoff=%dmV/cell tech=%d div=%d",
+             cell_count, capacity_mah, cell_voltage_max_mv, cell_voltage_warn_mv,
+             cell_voltage_cutoff_mv, technology, adc_divider_factor_x1000);
 }

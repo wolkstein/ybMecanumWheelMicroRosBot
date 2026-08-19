@@ -24,6 +24,7 @@
 #include <geometry_msgs/msg/vector3.h>
 #include <nav_msgs/msg/odometry.h>
 #include <std_msgs/msg/u_int16.h>
+#include <std_msgs/msg/int32_multi_array.h>
 #include <sensor_msgs/msg/imu.h>
 #include <sensor_msgs/msg/battery_state.h>
 
@@ -124,6 +125,9 @@ geometry_msgs__msg__Vector3 msg_calibrate;
 rcl_publisher_t publisher_battery;
 sensor_msgs__msg__BatteryState msg_battery;
 rcl_timer_t timer_battery;
+
+rcl_subscription_t battery_config_subscriber;
+std_msgs__msg__Int32MultiArray msg_battery_config;
 
 
 unsigned long long time_offset = 0;
@@ -261,6 +265,37 @@ void battery_ros_init(void)
     msg_battery.present = true;
     msg_battery.power_supply_status = sensor_msgs__msg__BatteryState__POWER_SUPPLY_STATUS_UNKNOWN; // no charge-detection hardware
     msg_battery.power_supply_technology = (uint8_t)Battery_Get_Technology();
+}
+
+// Order of values in the /battery_config Int32MultiArray, matches Battery_Save()
+#define BATTERY_CONFIG_PARAM_COUNT 7
+
+// Pre-allocate the fixed-size data array so the micro-ROS deserializer has
+// somewhere to write into -- must exist before the executor starts spinning.
+// (layout.dim stays zero-initialized/empty: we don't use multi-dimensional
+// layout metadata, just a flat 7-element array.)
+void battery_config_ros_init(void)
+{
+    msg_battery_config.data.data = malloc(BATTERY_CONFIG_PARAM_COUNT * sizeof(int32_t));
+    msg_battery_config.data.size = 0;
+    msg_battery_config.data.capacity = BATTERY_CONFIG_PARAM_COUNT;
+}
+
+// Subscriber callback: /battery_config, Int32MultiArray with exactly
+// [cell_count, capacity_mah, cell_voltage_max_mv, cell_voltage_warn_mv,
+//  cell_voltage_cutoff_mv, technology, adc_divider_factor_x1000]
+void battery_config_callback(const void *msgin)
+{
+    const std_msgs__msg__Int32MultiArray *msg = (const std_msgs__msg__Int32MultiArray *)msgin;
+    if (msg->data.size != BATTERY_CONFIG_PARAM_COUNT)
+    {
+        ESP_LOGE(TAG, "battery_config: expected %d values, got %d",
+                 BATTERY_CONFIG_PARAM_COUNT, (int)msg->data.size);
+        return;
+    }
+    Battery_Save(msg->data.data[0], msg->data.data[1], msg->data.data[2],
+                 msg->data.data[3], msg->data.data[4], msg->data.data[5],
+                 msg->data.data[6]);
 }
 
 // Euler's angular revolution quaternion
@@ -408,6 +443,7 @@ void timer_battery_callback(rcl_timer_t *timer, int64_t last_call_time)
         float voltage = Battery_Get_Voltage();
         int cells = Battery_Get_CellCount();
         float v_max = cells * (Battery_Get_CellVoltageMaxMV() / 1000.0f);
+        float v_warn = cells * (Battery_Get_CellVoltageWarnMV() / 1000.0f);
         float v_cutoff = cells * (Battery_Get_CellVoltageCutoffMV() / 1000.0f);
 
         msg_battery.voltage = voltage;
@@ -420,6 +456,14 @@ void timer_battery_callback(rcl_timer_t *timer, int64_t last_call_time)
             : sensor_msgs__msg__BatteryState__POWER_SUPPLY_HEALTH_GOOD;
 
         RCSOFTCHECK(rcl_publish(&publisher_battery, &msg_battery, NULL));
+
+        // Periodic low-battery warning: short beep once per timer tick (1Hz)
+        // while below the warn threshold. Re-triggered every tick, so it
+        // naturally stops as soon as voltage recovers above v_warn.
+        if (voltage > 0.0f && voltage < v_warn)
+        {
+            Beep_On_Time(150);
+        }
     }
 }
 
@@ -533,6 +577,13 @@ void micro_ros_task(void *arg)
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3),
         "calibrate"));
 
+    // Create subscriber /battery_config (Int32MultiArray, see battery_config_callback)
+    RCCHECK(rclc_subscription_init_default(
+        &battery_config_subscriber,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32MultiArray),
+        "battery_config"));
+
     // create publisher_imu
     RCCHECK(rclc_publisher_init_default(
         &publisher_imu,
@@ -573,7 +624,7 @@ void micro_ros_task(void *arg)
 
     // create executor. Three of the parameters are the number of actuators controlled that is greater than or equal to the number of subscribers and publishers added to the executor.
     rclc_executor_t executor;
-    int handle_num = 6;
+    int handle_num = 7;
     RCCHECK(rclc_executor_init(&executor, &support.context, handle_num, &allocator));
 
     // Adds the publisher_odom's timer to the executor
@@ -608,6 +659,12 @@ void micro_ros_task(void *arg)
         &calibrate_callback,
         ON_NEW_DATA));
 
+    RCCHECK(rclc_executor_add_subscription(
+        &executor,
+        &battery_config_subscriber,
+        &msg_battery_config,
+        &battery_config_callback,
+        ON_NEW_DATA));
 
     sync_time();
 
@@ -623,6 +680,7 @@ void micro_ros_task(void *arg)
     RCCHECK(rcl_subscription_fini(&twist_subscriber, &node));
     RCCHECK(rcl_subscription_fini(&buzzer_subscriber,&node));
     RCCHECK(rcl_subscription_fini(&calibrate_subscriber, &node));
+    RCCHECK(rcl_subscription_fini(&battery_config_subscriber, &node));
     RCCHECK(rcl_publisher_fini(&publisher_imu, &node));
     RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
     RCCHECK(rcl_node_fini(&node));
@@ -650,6 +708,7 @@ void app_main(void)
     imu_ros_init();
     odom_ros_init();
     battery_ros_init();
+    battery_config_ros_init();
 
     // Start microROS tasks
     xTaskCreate(micro_ros_task,
