@@ -72,5 +72,55 @@ menu "Robot physical dimensions"
         Distance between front and rear wheel contact points in millimeters.
 
 endmenu
-        
+
+menu "Battery configuration"
+
+    config BATTERY_CELL_COUNT
+        int "Number of cells in series"
+        default 2
+        help
+        Number of Li-ion/LiPo cells in series (2S = 7.4V nominal, 8.4V max).
+
+    config BATTERY_CAPACITY_MAH
+        int "Rated capacity (mAh)"
+        default 2000
+        help
+        Rated pack capacity in mAh, printed on the battery.
+
+    config BATTERY_CELL_VOLTAGE_MAX_MV
+        int "Max voltage per cell (mV)"
+        default 4200
+        help
+        Fully charged voltage per cell. 4.2V is standard for both Li-ion and LiPo.
+
+    config BATTERY_CELL_VOLTAGE_CUTOFF_MV
+        int "Cutoff voltage per cell (mV)"
+        default 3450
+        help
+        Per-cell low-voltage shutdown threshold. Cell chemistry of this pack is
+        not confirmed (label suggests LiPo or 18650 Li-ion). 3450mV is the
+        conservative LiPo-safe cutoff: using it on an actual Li-ion pack just
+        triggers a slightly early low-battery warning, whereas using a lower
+        Li-ion-typical cutoff (~2800-3000mV) on an actual LiPo pack risks
+        over-discharge damage. Adjust once the cell chemistry is confirmed.
+
+    config BATTERY_TECHNOLOGY
+        int "Battery chemistry (sensor_msgs/BatteryState technology constant)"
+        default 3
+        range 0 8
+        help
+        sensor_msgs/msg/BatteryState POWER_SUPPLY_TECHNOLOGY_* constant:
+        2 = Li-ion, 3 = LiPo. Not confirmed for this pack; default (3, LiPo)
+        matches the conservative cutoff default above.
+
+    config BATTERY_ADC_DIVIDER_FACTOR_X1000
+        int "Voltage divider factor (x1000)"
+        default 4030
+        help
+        Pack voltage = ADC-measured GPIO voltage * this / 1000. Default 4030
+        (factor 4.03) is Yahboom's stock onboard divider (10k/3.3k) for the
+        battery-sense circuit on GPIO3 / ADC1 channel 2.
+
+endmenu
+
 endmenu

@@ -25,11 +25,13 @@
 #include <nav_msgs/msg/odometry.h>
 #include <std_msgs/msg/u_int16.h>
 #include <sensor_msgs/msg/imu.h>
+#include <sensor_msgs/msg/battery_state.h>
 
 #include "icm42670p.h"
 #include "car_motion.h"
 #include "beep.h"
 #include "calibration.h"
+#include "battery.h"
 
 // Custom UART transport for micro-ROS
 #define UART_BUFFER_SIZE 512
@@ -118,6 +120,10 @@ std_msgs__msg__UInt16 msg_beep;
 
 rcl_subscription_t calibrate_subscriber;
 geometry_msgs__msg__Vector3 msg_calibrate;
+
+rcl_publisher_t publisher_battery;
+sensor_msgs__msg__BatteryState msg_battery;
+rcl_timer_t timer_battery;
 
 
 unsigned long long time_offset = 0;
@@ -220,6 +226,69 @@ void odom_ros_init(void)
     msg_odom.child_frame_id = micro_ros_string_utilities_set(msg_odom.child_frame_id, child_frame_id);
     free(frame_id);
     free(child_frame_id);
+}
+
+// Initializes the ROS topic information for battery_state
+void battery_ros_init(void)
+{
+    char* content_frame_id = "battery_frame";
+    int len_namespace = strlen(ROS_NAMESPACE);
+    int len_frame_id_max = len_namespace + strlen(content_frame_id) + 2;
+    char* frame_id = malloc(len_frame_id_max);
+    if (len_namespace == 0)
+    {
+        sprintf(frame_id, "%s", content_frame_id);
+    }
+    else
+    {
+        sprintf(frame_id, "%s/%s", ROS_NAMESPACE, content_frame_id);
+    }
+    msg_battery.header.frame_id = micro_ros_string_utilities_set(msg_battery.header.frame_id, frame_id);
+    free(frame_id);
+
+    // location/serial_number must be a valid (non-NULL-data) rosidl string,
+    // never left zero-initialized -- see MicroRosServoControlBoard crash notes.
+    msg_battery.location = micro_ros_string_utilities_init("");
+    msg_battery.serial_number = micro_ros_string_utilities_init("");
+
+    // cell_voltage/cell_temperature stay zero-initialized (size=0): we only
+    // measure total pack voltage via one ADC pin, no per-cell taps.
+    msg_battery.design_capacity = Battery_Get_CapacityMah() / 1000.0f; // mAh -> Ah
+    msg_battery.capacity = NAN;    // last full capacity: unmeasured
+    msg_battery.charge = NAN;      // current charge: unmeasured
+    msg_battery.current = NAN;     // pack current: no shunt/sense hardware
+    msg_battery.temperature = NAN; // no temperature sensor
+    msg_battery.present = true;
+    msg_battery.power_supply_status = sensor_msgs__msg__BatteryState__POWER_SUPPLY_STATUS_UNKNOWN; // no charge-detection hardware
+    msg_battery.power_supply_technology = (uint8_t)Battery_Get_Technology();
+}
+
+// Timer callback function
+void timer_battery_callback(rcl_timer_t *timer, int64_t last_call_time)
+{
+    RCLC_UNUSED(last_call_time);
+    if (timer != NULL)
+    {
+        struct timespec time_stamp = get_timespec();
+        msg_battery.header.stamp.sec = time_stamp.tv_sec;
+        msg_battery.header.stamp.nanosec = time_stamp.tv_nsec;
+
+        float voltage = Battery_Get_Voltage();
+        int cells = Battery_Get_CellCount();
+        float v_max = cells * (Battery_Get_CellVoltageMaxMV() / 1000.0f);
+        float v_cutoff = cells * (Battery_Get_CellVoltageCutoffMV() / 1000.0f);
+
+        msg_battery.voltage = voltage;
+        float pct = (voltage - v_cutoff) / (v_max - v_cutoff);
+        if (pct < 0.0f) pct = 0.0f;
+        if (pct > 1.0f) pct = 1.0f;
+        msg_battery.percentage = pct;
+        msg_battery.power_supply_health = (voltage <= v_cutoff)
+            ? sensor_msgs__msg__BatteryState__POWER_SUPPLY_HEALTH_DEAD
+            : sensor_msgs__msg__BatteryState__POWER_SUPPLY_HEALTH_GOOD;
+
+        RCSOFTCHECK(rcl_publish(&publisher_battery, &msg_battery, NULL));
+    }
 }
 
 // Euler's angular revolution quaternion
@@ -471,6 +540,13 @@ void micro_ros_task(void *arg)
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
         "imu"));
 
+    // create publisher_battery
+    RCCHECK(rclc_publisher_init_default(
+        &publisher_battery,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, BatteryState),
+        "battery_state"));
+
     // create timer. Set the publish frequency to 11HZ
     const unsigned int odom_timer_timeout = 90;
     RCCHECK(rclc_timer_init_default2(
@@ -487,16 +563,27 @@ void micro_ros_task(void *arg)
         RCL_MS_TO_NS(imu_timer_timeout),
         timer_imu_callback, true));
 
+    // create timer. Set the publish frequency to 1HZ (battery changes slowly)
+    const unsigned int battery_timer_timeout = 1000;
+    RCCHECK(rclc_timer_init_default2(
+        &timer_battery,
+        &support,
+        RCL_MS_TO_NS(battery_timer_timeout),
+        timer_battery_callback, true));
+
     // create executor. Three of the parameters are the number of actuators controlled that is greater than or equal to the number of subscribers and publishers added to the executor.
     rclc_executor_t executor;
-    int handle_num = 5;
+    int handle_num = 6;
     RCCHECK(rclc_executor_init(&executor, &support.context, handle_num, &allocator));
-    
+
     // Adds the publisher_odom's timer to the executor
     RCCHECK(rclc_executor_add_timer(&executor, &timer_odom));
 
     // Adds the publisher_imu's timer to the executor
     RCCHECK(rclc_executor_add_timer(&executor, &timer_imu));
+
+    // Adds the publisher_battery's timer to the executor
+    RCCHECK(rclc_executor_add_timer(&executor, &timer_battery));
 
     // Add a subscriber twist to the executor
     RCCHECK(rclc_executor_add_subscription(
@@ -537,6 +624,7 @@ void micro_ros_task(void *arg)
     RCCHECK(rcl_subscription_fini(&buzzer_subscriber,&node));
     RCCHECK(rcl_subscription_fini(&calibrate_subscriber, &node));
     RCCHECK(rcl_publisher_fini(&publisher_imu, &node));
+    RCCHECK(rcl_publisher_fini(&publisher_battery, &node));
     RCCHECK(rcl_node_fini(&node));
 
     vTaskDelete(NULL);
@@ -552,7 +640,8 @@ void app_main(void)
     Beep_Init();
     Motor_Init();
     Icm42670p_Init();
-   
+    Battery_Init();
+
     // Initialize the network and connect the WiFi signal
 #if CONFIG_MICRO_ROS_ESP_NETIF_WLAN || CONFIG_MICRO_ROS_ESP_NETIF_ENET
     ESP_ERROR_CHECK(uros_network_interface_initialize());
@@ -560,6 +649,7 @@ void app_main(void)
 
     imu_ros_init();
     odom_ros_init();
+    battery_ros_init();
 
     // Start microROS tasks
     xTaskCreate(micro_ros_task,
