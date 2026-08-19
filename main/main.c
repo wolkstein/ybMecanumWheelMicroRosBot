@@ -232,7 +232,20 @@ void odom_ros_init(void)
     free(child_frame_id);
 }
 
-// Initializes the ROS topic information for battery_state
+/**
+ * @brief Set up the static/one-time fields of the /battery_state message.
+ *
+ * Sets the frame_id (namespace-prefixed like the odom/imu frames), the
+ * required-non-NULL location/serial_number strings, the design_capacity
+ * derived from the current battery config, and the fields we can't measure
+ * (temperature/current/charge/capacity => NaN, no such sensors on this
+ * board). The per-cycle fields (voltage, percentage, health, timestamp) are
+ * filled in by timer_battery_callback() on every publish.
+ *
+ * Must be called once during startup, after Battery_Init() (so
+ * Battery_Get_CapacityMah() returns the loaded config) and before the
+ * micro-ROS task starts publishing.
+ */
 void battery_ros_init(void)
 {
     char* content_frame_id = "battery_frame";
@@ -267,13 +280,25 @@ void battery_ros_init(void)
     msg_battery.power_supply_technology = (uint8_t)Battery_Get_Technology();
 }
 
-// Order of values in the /battery_config Int32MultiArray, matches Battery_Save()
+/** Number of int32 values expected in a /battery_config message, and their
+ *  order -- must match the parameter order of Battery_Save() exactly:
+ *  [cell_count, capacity_mah, cell_voltage_max_mv, cell_voltage_warn_mv,
+ *   cell_voltage_cutoff_mv, technology, adc_divider_factor_x1000] */
 #define BATTERY_CONFIG_PARAM_COUNT 7
 
-// Pre-allocate the fixed-size data array so the micro-ROS deserializer has
-// somewhere to write into -- must exist before the executor starts spinning.
-// (layout.dim stays zero-initialized/empty: we don't use multi-dimensional
-// layout metadata, just a flat 7-element array.)
+/**
+ * @brief Pre-allocate the /battery_config subscription's data buffer.
+ *
+ * The micro-ROS deserializer writes incoming Int32MultiArray elements
+ * directly into msg_battery_config.data.data, so that buffer must already
+ * exist (with capacity >= BATTERY_CONFIG_PARAM_COUNT) before the executor
+ * starts spinning -- there is no reallocation on receive. layout.dim stays
+ * zero-initialized/empty since we don't use multi-dimensional layout
+ * metadata, just a flat fixed-size array.
+ *
+ * Must be called once during startup, before the micro-ROS task's executor
+ * starts spinning (see app_main()).
+ */
 void battery_config_ros_init(void)
 {
     msg_battery_config.data.data = malloc(BATTERY_CONFIG_PARAM_COUNT * sizeof(int32_t));
@@ -281,9 +306,17 @@ void battery_config_ros_init(void)
     msg_battery_config.data.capacity = BATTERY_CONFIG_PARAM_COUNT;
 }
 
-// Subscriber callback: /battery_config, Int32MultiArray with exactly
-// [cell_count, capacity_mah, cell_voltage_max_mv, cell_voltage_warn_mv,
-//  cell_voltage_cutoff_mv, technology, adc_divider_factor_x1000]
+/**
+ * @brief Subscriber callback for /battery_config.
+ *
+ * Expects an Int32MultiArray with exactly BATTERY_CONFIG_PARAM_COUNT values
+ * in the order documented at BATTERY_CONFIG_PARAM_COUNT. Messages with a
+ * different length are rejected (logged, not applied) rather than read
+ * out-of-bounds. Valid messages are forwarded to Battery_Save(), which
+ * applies them immediately and persists them to NVS.
+ *
+ * @param msgin Pointer to the received std_msgs__msg__Int32MultiArray.
+ */
 void battery_config_callback(const void *msgin)
 {
     const std_msgs__msg__Int32MultiArray *msg = (const std_msgs__msg__Int32MultiArray *)msgin;
@@ -430,7 +463,21 @@ void timer_imu_callback(rcl_timer_t *timer, int64_t last_call_time)
     }
 }
 
-// Timer callback function
+/**
+ * @brief 1Hz timer callback: publish /battery_state and drive the low-battery beep.
+ *
+ * Computes pack-level max/warn/cutoff voltages from the per-cell config
+ * (Battery_Get_CellVoltageMaxMV() etc. times the cell count), fills in the
+ * per-cycle fields of msg_battery (voltage, percentage, health, timestamp)
+ * and publishes it. If the pack voltage is below the warn threshold, also
+ * triggers a short buzzer pulse -- since this callback re-fires every
+ * second, that naturally produces a "beep once per second" warning pattern
+ * for as long as the voltage stays low, with no separate timer needed.
+ *
+ * @param timer          The firing rcl_timer_t (timer_battery). NULL-checked
+ *                        defensively, mirroring the other timer callbacks.
+ * @param last_call_time Unused; required by the rclc timer callback signature.
+ */
 void timer_battery_callback(rcl_timer_t *timer, int64_t last_call_time)
 {
     RCLC_UNUSED(last_call_time);

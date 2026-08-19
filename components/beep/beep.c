@@ -1,3 +1,7 @@
+/**
+ * @file beep.c
+ * @brief Implementation of the piezo buzzer driver, see beep.h.
+ */
 #include "beep.h"
 
 
@@ -17,11 +21,15 @@
 const static char *TAG = "BEEP";
 
 
-
+/** Current Beep_Handle() state machine state, one of BEEP_STATE_*. */
 static uint8_t beep_state = BEEP_STATE_OFF;
+/** Remaining ticks (10ms each) until auto-off, only meaningful in BEEP_STATE_ON_DELAY. */
 static uint16_t beep_on_time = 0;
 
 
+/**
+ * @brief Configure the buzzer GPIO as output and ensure it starts off.
+ */
 // 配置蜂鸣器GPIO口  configure GPIO with the buzzer
 static void Beep_GPIO_Init(void)
 {
@@ -43,6 +51,10 @@ static void Beep_GPIO_Init(void)
     Beep_Off();
 }
 
+/**
+ * @brief Background task that drives the Beep_Handle() auto-off state machine.
+ * @param arg Unused (required by the FreeRTOS task function signature).
+ */
 // 蜂鸣器后台任务 Buzzer background task
 static void Beep_Task(void *arg)
 {
@@ -84,8 +96,8 @@ void Beep_Off(void)
 }
 
 // 设置蜂鸣器开启时间，time=0时关闭，time=1时一直响，time>=10，延迟xx毫秒后自动关闭
-// Set the buzzer start time. When time=0, the buzzer is turned off. 
-// When time=1, the buzzer keeps ringing. 
+// Set the buzzer start time. When time=0, the buzzer is turned off.
+// When time=1, the buzzer keeps ringing.
 // When time>=10, the buzzer is turned off automatically after xx milliseconds
 void Beep_On_Time(uint16_t time)
 {
@@ -103,6 +115,8 @@ void Beep_On_Time(uint16_t time)
 	}
 	else
 	{
+		// Clamp to the supported pulse-length range before converting to
+		// 10ms ticks (Beep_Handle() decrements once per task cycle).
 		if (time < 10) time = 10;
         if (time > 10000) time = 10000;
         beep_state = BEEP_STATE_ON_DELAY;

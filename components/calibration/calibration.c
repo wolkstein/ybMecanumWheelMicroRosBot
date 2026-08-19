@@ -1,3 +1,7 @@
+/**
+ * @file calibration.c
+ * @brief Implementation of robot-dimension calibration, see calibration.h.
+ */
 #include "calibration.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -7,11 +11,23 @@
 static const char *TAG = "CALIB";
 #define NVS_NAMESPACE "calib"
 
+/** In-memory calibration, initialized from Kconfig defaults, overwritten by
+ *  Calibration_Init() if NVS has saved values, updated live by Calibration_Save(). */
 static float g_wheel_diameter_mm = CALIB_DEFAULT_WHEEL_DIAMETER_MM;
 static float g_robot_width_m     = CALIB_DEFAULT_ROBOT_WIDTH_M;
 static float g_robot_length_m    = CALIB_DEFAULT_ROBOT_LENGTH_M;
 
-// NVS has no native float type – store as raw u32 bytes
+/**
+ * @brief Read a float value from NVS.
+ *
+ * NVS has no native float type, so values are stored as their raw 4-byte
+ * bit pattern in a u32 slot and reinterpreted here. Leaves *out untouched
+ * if the key doesn't exist (e.g. first boot).
+ *
+ * @param h   Open NVS handle.
+ * @param key NVS key to read.
+ * @param out Destination for the decoded float.
+ */
 static void nvs_get_float(nvs_handle_t h, const char *key, float *out)
 {
     uint32_t raw;
@@ -19,6 +35,12 @@ static void nvs_get_float(nvs_handle_t h, const char *key, float *out)
         memcpy(out, &raw, sizeof(float));
 }
 
+/**
+ * @brief Write a float value to NVS as its raw bit pattern.
+ * @param h   Open NVS handle (must have been opened with write access).
+ * @param key NVS key to write.
+ * @param val Float value to store.
+ */
 static void nvs_set_float(nvs_handle_t h, const char *key, float val)
 {
     uint32_t raw;
@@ -30,6 +52,7 @@ void Calibration_Init(void)
 {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // Partition layout changed or is uninitialized -- wipe and retry once.
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
@@ -37,6 +60,7 @@ void Calibration_Init(void)
 
     nvs_handle_t handle;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        // Namespace doesn't exist yet -- nothing has been saved, keep Kconfig defaults.
         ESP_LOGI(TAG, "No saved calibration, using defaults");
         return;
     }

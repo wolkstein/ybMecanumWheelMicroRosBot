@@ -1,3 +1,7 @@
+/**
+ * @file battery.c
+ * @brief Implementation of battery pack monitoring, see battery.h.
+ */
 #include "battery.h"
 #include <inttypes.h>
 #include "nvs_flash.h"
@@ -12,14 +16,19 @@
 static const char *TAG = "BATTERY";
 #define NVS_NAMESPACE "battery"
 
-// Onboard battery-sense circuit (Yahboom microROS control board): GPIO3 ->
-// ADC1 channel 2 on ESP32-S3, fixed 10k/3.3k divider (factor ~4.03).
+/** Onboard battery-sense circuit (Yahboom microROS control board): GPIO3 ->
+ *  ADC1 channel 2 on ESP32-S3, fixed 10k/3.3k divider (factor ~4.03). */
 #define ADC_CHANNEL_BATTERY ADC_CHANNEL_2
 #define ADC_ATTEN_BATTERY   ADC_ATTEN_DB_12
 
-// int32_t (not plain int) to match nvs_get_i32's out-param type exactly --
-// on this toolchain int32_t is `long`, distinct from `int` for strict
-// pointer-type checking even though both are 32-bit.
+/** @name In-memory pack configuration.
+ *  int32_t (not plain int) to match nvs_get_i32()'s out-param type exactly --
+ *  on this toolchain int32_t is `long`, distinct from `int` for strict
+ *  pointer-type checking even though both are 32-bit. Initialized from the
+ *  Kconfig defaults, overwritten by battery_nvs_load() if NVS has saved
+ *  values, and updated live by Battery_Save().
+ *  @{
+ */
 static int32_t g_cell_count             = BATTERY_DEFAULT_CELL_COUNT;
 static int32_t g_capacity_mah           = BATTERY_DEFAULT_CAPACITY_MAH;
 static int32_t g_cell_voltage_max_mv    = BATTERY_DEFAULT_CELL_VOLTAGE_MAX_MV;
@@ -27,11 +36,23 @@ static int32_t g_cell_voltage_warn_mv   = BATTERY_DEFAULT_CELL_VOLTAGE_WARN_MV;
 static int32_t g_cell_voltage_cutoff_mv = BATTERY_DEFAULT_CELL_VOLTAGE_CUTOFF_MV;
 static int32_t g_technology             = BATTERY_DEFAULT_TECHNOLOGY;
 static int32_t g_adc_divider_factor_x1000 = BATTERY_DEFAULT_ADC_DIVIDER_FACTOR_X1000;
+/** @} */
 
 static adc_oneshot_unit_handle_t battery_adc_handle;
 static adc_cali_handle_t battery_cali_handle;
+
+/** Latest measured pack voltage in Volts, written by battery_task() every
+ *  ~100ms and read by Battery_Get_Voltage(). */
 static volatile float g_battery_voltage = 0.0f;
 
+/**
+ * @brief Load the pack configuration from NVS, if any was previously saved.
+ *
+ * Initializes the NVS flash partition (erasing and retrying once if it's
+ * missing or from an incompatible version). If the "battery" NVS namespace
+ * doesn't exist yet (first boot / never saved), the Kconfig-derived defaults
+ * already in the g_* globals are left untouched.
+ */
 static void battery_nvs_load(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -61,6 +82,18 @@ static void battery_nvs_load(void)
              g_cell_voltage_cutoff_mv, g_technology, g_adc_divider_factor_x1000);
 }
 
+/**
+ * @brief Create the ADC hardware calibration scheme for the battery channel.
+ *
+ * Uses ESP-IDF's curve-fitting calibration so adc_cali_raw_to_voltage() in
+ * battery_task() returns an accurate millivolt reading, not just a raw
+ * ADC count.
+ *
+ * @param unit    ADC unit to calibrate (ADC_UNIT_1 for the battery channel).
+ * @param channel ADC channel to calibrate (ADC_CHANNEL_BATTERY).
+ * @param atten   Attenuation setting to calibrate for (ADC_ATTEN_BATTERY).
+ * @return true if the calibration scheme was created successfully, false otherwise.
+ */
 static bool battery_adc_cali_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten)
 {
     adc_cali_curve_fitting_config_t cali_config = {
@@ -78,6 +111,12 @@ static bool battery_adc_cali_init(adc_unit_t unit, adc_channel_t channel, adc_at
     return false;
 }
 
+/**
+ * @brief Configure the ADC oneshot unit/channel used for battery sensing.
+ *
+ * Sets up ADC1 channel 2 (GPIO3) with ADC_ATTEN_DB_12 attenuation, then
+ * calls battery_adc_cali_init() to enable calibrated voltage readings.
+ */
 static void battery_adc_init(void)
 {
     adc_oneshot_unit_init_cfg_t init_config1 = {
@@ -94,6 +133,18 @@ static void battery_adc_init(void)
     battery_adc_cali_init(ADC_UNIT_1, ADC_CHANNEL_BATTERY, ADC_ATTEN_BATTERY);
 }
 
+/**
+ * @brief Background FreeRTOS task that samples the pack voltage.
+ *
+ * Every 100ms: reads the calibrated ADC voltage on the battery-sense
+ * channel, applies the (possibly just-updated-via-Battery_Save())
+ * voltage-divider factor, and stores the result in g_battery_voltage. The
+ * divider factor is re-read from the global on every cycle (not cached at
+ * task start) so that a `/battery_config` update takes effect immediately,
+ * without needing a reboot.
+ *
+ * @param arg Unused (required by the FreeRTOS task function signature).
+ */
 static void battery_task(void *arg)
 {
     int adc_raw, cali_voltage_mv;
@@ -101,8 +152,6 @@ static void battery_task(void *arg)
     while (1) {
         if (adc_oneshot_read(battery_adc_handle, ADC_CHANNEL_BATTERY, &adc_raw) == ESP_OK &&
             adc_cali_raw_to_voltage(battery_cali_handle, adc_raw, &cali_voltage_mv) == ESP_OK) {
-            // Read fresh each cycle (not cached) so Battery_Save() takes
-            // effect immediately without a reboot.
             float divider_factor = g_adc_divider_factor_x1000 / 1000.0f;
             g_battery_voltage = (cali_voltage_mv / 1000.0f) * divider_factor;
         }
